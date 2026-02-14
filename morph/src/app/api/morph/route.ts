@@ -21,7 +21,8 @@ export async function POST(req: Request) {
   const payload = {
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
     messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-    temperature: 0.4
+    temperature: 0.4,
+    response_format: { type: "json_object" }
   };
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -43,11 +44,14 @@ export async function POST(req: Request) {
 
   const json = safeJsonParse(text);
   if (!json) {
+    console.log("Invalid JSON from model:", text);
     return NextResponse.json({ error: "Invalid JSON from model", raw: text }, { status: 500 });
   }
 
   const parsed = MorphResponseSchema.safeParse(json);
   if (!parsed.success) {
+    console.log("Schema invalid:", parsed.error.issues);
+    console.log("Raw JSON:", json);
     return NextResponse.json(
       { error: "Schema invalid", issues: parsed.error.issues, raw: json },
       { status: 500 }
