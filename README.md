@@ -162,18 +162,18 @@ Sophiie senior engineers and CTO. Judging will take place over a 2-week period f
 
 | Field | Your Answer |
 |-------|-------------|
-| **Name** | |
-| **University / Employer** | |
+| **Name** | Sai Krishnan Pradeep Kumar |
+| **University / Employer** | Monash University, Mel |
 
 ### Project
 
 | Field | Your Answer |
 |-------|-------------|
-| **Project Name** | |
-| **One-Line Description** | |
+| **Project Name** | Morph |
+| **One-Line Description** | An AI agent where the interface reshapes itself in real-time based on conversational intent. |
 | **Demo Video Link** | |
-| **Tech Stack** | |
-| **AI Provider(s) Used** | |
+| **Tech Stack** | Next.js / Vue, TailwindCSS, Framer Motion, OpenAI API |
+| **AI Provider(s) Used** | OpenAI |
 
 ### About Your Project
 
@@ -181,32 +181,47 @@ Sophiie senior engineers and CTO. Judging will take place over a 2-week period f
 
 <!-- 2-3 paragraphs explaining your agent, the problem it solves, and why the interaction matters -->
 
+Morph is an adaptive AI agent that changes its interface layout depending on how the user is thinking. Instead of only generating responses, the system detects conversational intent and reshapes the workspace dynamically into one of three modes: Reflective Mode (for uncertainty and exploration), Analytical Mode (for comparisons and trade-offs), and Planning Mode (for structured next steps and timelines). The AI adjusts the environment around the user to better support the type of thinking happening in that moment
+
 #### How does the interaction work?
 
 <!-- Describe the user experience — what does a user see, hear, or do when using your agent? -->
 
+Each user message is sent to the AI along with recent conversation context. The model returns structured output including the detected mode, assistant response, and workspace payload. The frontend renders one of three distinct workspace layouts based on the detected mode. When the conversation shifts, the layout smoothly morphs to a different configuration. The result is a dynamic interaction where the interface evolves alongside the conversation.
+
 #### What makes it special?
 
 <!-- What are you most proud of? What would you want the judges to notice? -->
+
+Most AI assistants change their responses. Morph changes the space. Instead of adapting only the text, Morph adapts layout structure, visual density, information organization, and cognitive framing. It explores the idea that the interface itself should respond to how we think, not just what we ask. The experience feels less like chatting with a tool and more like the AI reshaping the room to match the user’s mindset.
 
 #### How to run it
 
 <!-- Step-by-step instructions to set up and run your project locally -->
 
 ```bash
-# Example:
 # git clone <your-repo>
-# cd <your-project>
+# cd morph
 # npm install
-# cp .env.example .env  # add your API keys
-# npm start
+# cp .env.example .env  # add your OPENAI_API_KEY
+# npm run dev
 ```
+
 
 #### Architecture / Technical Notes
 
 <!-- Optional: describe your architecture, key technical decisions, or interesting implementation details -->
 
 ---
+
+Frontend: React (Next.js) or Vue for component-based rendering, TailwindCSS for styling, Framer Motion for layout morphing and smooth transitions, and local state management for conversation context.
+
+Backend: Single API route for AI calls using OpenAI with structured JSON output. The system performs lightweight mode classification and workspace payload generation.
+
+Flow: User submits a message → backend sends conversation context to OpenAI → model returns mode, assistant response, and workspace payload → frontend updates chat stream and morphs layout accordingly.
+
+No database is required. All session state is maintained client-side to keep the architecture lean and focused on interaction design.
+
 
 ## Code of Conduct
 
