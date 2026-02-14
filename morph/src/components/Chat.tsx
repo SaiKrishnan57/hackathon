@@ -11,15 +11,48 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<Mode>("reflective");
-  const [workspace, setWorkspace] = useState<Record<string, any> | null>(null);
+  const [dashboardState, setDashboardState] = useState<any>({ widgets: [] });
   const [loading, setLoading] = useState(false);
+
+  // ✅ Merge dashboard widgets intelligently
+  function mergeDashboard(prev: any, incoming: any) {
+    if (!incoming) return prev;
+
+    if (incoming.action === "set") {
+      return { widgets: incoming.widgets ?? [] };
+    }
+
+    // patch mode
+    const prevMap = new Map(
+      (prev.widgets ?? []).map((w: any) => [w.id, w])
+    );
+
+    for (const w of incoming.widgets ?? []) {
+      prevMap.set(w.id, { ...(prevMap.get(w.id) ?? {}), ...w });
+    }
+
+    const merged = Array.from(prevMap.values());
+
+    // sort by priority descending
+    merged.sort(
+      (a: any, b: any) =>
+        (b.priority ?? 0) - (a.priority ?? 0) ||
+        a.id.localeCompare(b.id)
+    );
+
+    return { widgets: merged };
+  }
 
   const canSend = input.trim().length > 0 && !loading;
 
   async function send() {
     if (!canSend) return;
 
-    const userMsg: ChatMessage = { role: "user", content: input.trim() };
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: input.trim(),
+    };
+
     const nextMsgs = [...messages, userMsg];
 
     setMessages(nextMsgs);
@@ -30,28 +63,49 @@ export default function Chat() {
       const res = await fetch("/api/morph", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMsgs })
+        body: JSON.stringify({
+          messages: nextMsgs,
+          dashboardState, // ✅ send current dashboard
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setMessages((m) => [...m, { role: "assistant", content: "Something went wrong. Try again." }]);
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content: "Something went wrong. Try again.",
+          },
+        ]);
         return;
       }
 
       const parsed = data as MorphResponse;
 
+      // Update mode
       setMode(parsed.mode);
-      setWorkspace(parsed.workspace_payload ?? null);
-      setMessages((m) => [...m, { role: "assistant", content: parsed.assistant_response }]);
+
+      // Merge dashboard widgets
+      setDashboardState((prev: any) =>
+        mergeDashboard(prev, parsed.dashboard)
+      );
+
+      // Add assistant message
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: parsed.assistant_response },
+      ]);
     } finally {
       setLoading(false);
     }
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send();
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      send();
+    }
   }
 
   return (
@@ -59,10 +113,13 @@ export default function Chat() {
       <div className="mx-auto max-w-6xl px-4 py-6">
         <header className="mb-6">
           <div className="text-2xl font-semibold">Morph</div>
-          <div className="text-zinc-400">The interface changes as the conversation changes.</div>
+          <div className="text-zinc-400">
+            AI Dashboard Engine — conversation composes your interface.
+          </div>
         </header>
 
         <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          {/* Chat Panel */}
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
             <div className="h-[56vh] overflow-y-auto pr-2">
               <div className="space-y-3">
@@ -78,6 +135,7 @@ export default function Chat() {
                     {m.content}
                   </div>
                 ))}
+
                 {loading && (
                   <div className="mr-auto max-w-[85%] rounded-xl bg-zinc-800 px-3 py-2 text-sm text-zinc-200">
                     Thinking…
@@ -104,6 +162,7 @@ export default function Chat() {
             </div>
           </div>
 
+          {/* Dashboard Panel */}
           <AnimatePresence mode="wait">
             <motion.div
               key={mode}
@@ -111,9 +170,9 @@ export default function Chat() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.98 }}
               transition={{ duration: 0.22 }}
-              className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4"
+              className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 h-[56vh] overflow-y-auto"
             >
-              <Workspace mode={mode} payload={workspace} />
+              <Workspace mode={mode} dashboard={dashboardState} />
             </motion.div>
           </AnimatePresence>
         </div>

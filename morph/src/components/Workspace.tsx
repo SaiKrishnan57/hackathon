@@ -1,17 +1,18 @@
 "use client";
 
-import Reflective from "./modes/Reflective";
-import Analytical from "./modes/Analytical";
-import Planning from "./modes/Planning";
+import WidgetGrid from "./WidgetGrid";
 
 export default function Workspace({
   mode,
-  payload
+  dashboard
 }: {
   mode: "reflective" | "analytical" | "planning";
-  payload: Record<string, any> | null;
+  dashboard: any;
 }) {
-  if (mode === "analytical") return <Analytical payload={payload} />;
-  if (mode === "planning") return <Planning payload={payload} />;
-  return <Reflective payload={payload} />;
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-zinc-500">Mode: {mode}</div>
+      <WidgetGrid widgets={dashboard?.widgets ?? []} />
+    </div>
+  );
 }

@@ -4,7 +4,10 @@ import { SYSTEM_PROMPT } from "@/lib/prompt";
 
 export const runtime = "nodejs";
 
-type ReqBody = { messages: ChatMessage[] };
+type ReqBody = {
+  messages: ChatMessage[];
+  dashboardState?: any;
+};
 
 function safeJsonParse(text: string) {
   try {
@@ -18,12 +21,23 @@ export async function POST(req: Request) {
   const body = (await req.json()) as ReqBody;
   const messages = (body.messages ?? []).slice(-10);
 
+  const dashboardState = body.dashboardState ?? { widgets: [] };
+
   const payload = {
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-    temperature: 0.4,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: `Current dashboard JSON state: ${JSON.stringify(dashboardState)}` },
+      ...messages
+    ],
+    temperature: 0.3,
     response_format: { type: "json_object" }
   };
+
+
+
+
+ 
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
