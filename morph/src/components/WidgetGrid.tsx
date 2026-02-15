@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import BriefWidget from "./widgets/BriefWidget";
 import AssumptionsWidget from "./widgets/AssumptionsWidget";
 import ComparisonWidget from "./widgets/ComparisonWidget";
@@ -24,25 +24,37 @@ function renderWidget(w: any) {
   }
 }
 
-// Priority-based grid span
-function getSpanClass(w: any) {
-  const p = w.priority ?? 0;
-
-  // brief always full width
-  if (w.type === "brief") return "md:col-span-2 xl:col-span-3";
-
-  // very important widgets expand more
-  if (p >= 85) return "md:col-span-2 xl:col-span-2";
-
-  // normal widgets
-  return "md:col-span-1 xl:col-span-1";
+// Fixed spans for a stable dashboard:
+// - Big widgets span both columns
+// - Small widgets span one column
+function spanClass(w: any) {
+  if (w.type === "brief") return "col-span-2";
+  if (w.type === "comparison_table") return "col-span-2";
+  return "col-span-1";
 }
 
 export default function WidgetGrid({ widgets }: { widgets: any[] }) {
+  // Stable ordering:
+  // brief first, then comparison, then others by priority
+  const ordered = [...(widgets ?? [])].sort((a, b) => {
+    const rank = (x: any) => {
+      if (x.type === "brief") return 0;
+      if (x.type === "comparison_table") return 1;
+      return 2;
+    };
+    const r = rank(a) - rank(b);
+    if (r !== 0) return r;
+
+    const pr = (b.priority ?? 0) - (a.priority ?? 0);
+    if (pr !== 0) return pr;
+
+    return String(a.id).localeCompare(String(b.id));
+  });
+
   return (
-    <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-2 gap-3 grid-flow-row-dense">
       <AnimatePresence mode="popLayout">
-        {widgets.map((w) => {
+        {ordered.map((w) => {
           const child = renderWidget(w);
           if (!child) return null;
 
@@ -50,28 +62,13 @@ export default function WidgetGrid({ widgets }: { widgets: any[] }) {
             <motion.div
               key={w.id}
               layout
-              initial={{ opacity: 0, y: 12, scale: 0.985 }}
+              initial={{ opacity: 0, y: 10, scale: 0.99 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.98 }}
-              transition={{ duration: 0.22 }}
-              className={getSpanClass(w)}
+              exit={{ opacity: 0, y: -8, scale: 0.99 }}
+              transition={{ duration: 0.2 }}
+              className={`${spanClass(w)} min-w-0`}
             >
-              {/* Subtle "fresh" highlight if widget is marked updated */}
-              <motion.div
-                initial={false}
-                animate={
-                  w._flash
-                    ? {
-                        boxShadow:
-                          "0 0 0 1px rgba(255,255,255,0.10), 0 0 24px rgba(255,255,255,0.08)",
-                      }
-                    : { boxShadow: "0 0 0 0 rgba(0,0,0,0)" }
-                }
-                transition={{ duration: 0.35 }}
-                className="rounded-2xl"
-              >
-                {child}
-              </motion.div>
+              {child}
             </motion.div>
           );
         })}
