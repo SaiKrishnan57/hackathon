@@ -28,6 +28,12 @@ function modeAccentClass(mode: Mode) {
   return "text-emerald-200 border-emerald-500/30 bg-emerald-500/10";
 }
 
+const SAMPLE_PROMPTS = [
+  "I'm not sure whether to switch jobs or stay. Help me think it through.",
+  "Compare buying a car vs relying on public transport for the next year.",
+  "Give me a 4-week plan to launch a small side project.",
+];
+
 export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -69,14 +75,24 @@ export default function Chat() {
 
   const canSend = input.trim().length > 0 && !loading;
 
-  async function send() {
-    if (!canSend) return;
+  function startNewChat() {
+    setMessages([]);
+    setInput("");
+    setDashboardState({ widgets: [] });
+    setMode("reflective");
+    setPrevMode("reflective");
+    setModeToast(null);
+  }
 
-    const userMsg: ChatMessage = { role: "user", content: input.trim() };
+  async function send(contentOverride?: string) {
+    const text = (contentOverride ?? input).trim();
+    if (!text || loading) return;
+
+    const userMsg: ChatMessage = { role: "user", content: text };
     const nextMsgs = [...messages, userMsg];
 
     setMessages(nextMsgs);
-    setInput("");
+    if (!contentOverride) setInput("");
     setLoading(true);
 
     try {
@@ -98,7 +114,6 @@ export default function Chat() {
 
       const parsed = data as MorphResponse;
 
-      // Track previous mode for sweep animation
       setPrevMode(mode);
       setMode(parsed.mode);
 
@@ -156,21 +171,29 @@ export default function Chat() {
               </div>
             </div>
 
-            {/* Mode Indicator */}
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={mode}
-                initial={{ opacity: 0, x: 14 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -14 }}
-                transition={{ duration: 0.22 }}
-                className={`rounded-full border px-3 py-1 text-xs font-medium backdrop-blur ${modeAccentClass(
-                  mode
-                )}`}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={startNewChat}
+                className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
               >
-                Mode: {modeLabel(mode)}
-              </motion.div>
-            </AnimatePresence>
+                New chat
+              </button>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={mode}
+                  initial={{ opacity: 0, x: 14 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -14 }}
+                  transition={{ duration: 0.22 }}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium backdrop-blur ${modeAccentClass(
+                    mode
+                  )}`}
+                >
+                  Mode: {modeLabel(mode)}
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </header>
 
           {/* Optional toast */}
@@ -208,13 +231,36 @@ export default function Chat() {
                   ))}
 
                   {loading && (
-                    <div className="mr-auto max-w-[85%] rounded-xl bg-zinc-800 px-3 py-2 text-sm text-zinc-200">
-                      Thinking…
+                    <div className="mr-auto max-w-[85%] rounded-xl bg-zinc-800 px-4 py-3 text-sm">
+                      <div className="flex items-center gap-1.5 text-zinc-400">
+                        <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s]" />
+                        <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s]" />
+                        <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-zinc-500" />
+                        <span className="ml-2 text-zinc-500">Thinking…</span>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
 
+              {messages.length === 0 && (
+                <div className="mt-2">
+                  <div className="mb-2 text-xs text-zinc-500">Try this</div>
+                  <div className="flex flex-wrap gap-2">
+                    {SAMPLE_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => send(prompt)}
+                        disabled={loading}
+                        className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-left text-xs text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-50 disabled:pointer-events-none max-w-full"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mt-4 flex gap-2">
                 <input
                   value={input}
@@ -224,7 +270,7 @@ export default function Chat() {
                   className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:border-zinc-600"
                 />
                 <button
-                  onClick={send}
+                  onClick={() => send()}
                   disabled={!canSend}
                   className="rounded-xl bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
                 >
