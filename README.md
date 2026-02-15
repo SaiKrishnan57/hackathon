@@ -199,13 +199,24 @@ Most AI assistants change their responses. Morph changes the space. Instead of a
 
 <!-- Step-by-step instructions to set up and run your project locally -->
 
+**Prerequisites:** Node.js 18+ and an [OpenAI API key](https://platform.openai.com/api-keys).
+
 ```bash
-# git clone <your-repo>
-# cd morph
-# npm install
-# cp .env.example .env  # add your OPENAI_API_KEY
-# npm run dev
+git clone <your-repo-url>
+cd hackathon/morph
+npm install
+cp .env.example .env
 ```
+
+Edit `.env` and set **`OPENAI_API_KEY`** to your OpenAI API key (required for chat, dashboard, and Live talk).
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). No database or other services needed.
+
+**Full setup details** (env vars, optional config): see [morph/README.md](morph/README.md).
 
 
 #### Architecture / Technical Notes

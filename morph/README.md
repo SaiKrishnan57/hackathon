@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Morph – AI Dashboard Engine
 
-## Getting Started
+Morph is a conversational dashboard: you talk or type, and the right-hand panel becomes your dashboard. It adapts to **three modes** — **Reflective** (explore, clarify), **Analytical** (compare options, numbers, charts), and **Planning** (steps, timeline) — and updates in real time as the conversation evolves.
 
-First, run the development server:
+---
+
+## Setup (for judges / local run)
+
+### Prerequisites
+
+- **Node.js** 18+ and **npm** (or yarn/pnpm)
+- **OpenAI API key** (required for chat, dashboard, and Live talk)
+
+### 1. Clone and install
+
+```bash
+cd morph
+npm install
+```
+
+### 2. Environment variables
+
+Copy the example env file and add your OpenAI API key:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set:
+
+- **`OPENAI_API_KEY`** (required) – Your OpenAI API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Used for the Morph API (chat + dashboard) and for Live talk (realtime voice).
+
+Optional:
+
+- **`OPENAI_MODEL`** – Model for chat/dashboard (default: `gpt-4o-mini`). Leave unset or set to e.g. `gpt-4o-mini` or `gpt-4o`.
+
+**Important:** Do not commit `.env` or put a real API key in `.env.example`. The repo should only contain `.env.example` with placeholders.
+
+### 3. Run the app
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Quick check
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Chat:** Type a message or click a "Try this" sample prompt. The right panel should show the dashboard (brief, assumptions, etc.) and the mode (Reflective / Analytical / Planning) should update.
+- **Live talk:** Click the mic to start a voice call. You need microphone access and a supported browser (Chrome/Edge recommended). The same dashboard updates from voice.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Config summary
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Variable          | Required | Description |
+|-------------------|----------|-------------|
+| `OPENAI_API_KEY`  | Yes      | OpenAI API key for Morph API + Live talk |
+| `OPENAI_MODEL`    | No       | Model for chat/dashboard (default: `gpt-4o-mini`) |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+No database or other services are required. Everything runs locally with the Next.js dev server and OpenAI API.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Demo
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See **DEMO_SCRIPT.md** for a presenter script and **DEMO.md** for the three use cases (Reflective, Analytical, Planning).
+
+---
+
+## Tech stack
+
+- Next.js 16, React 19, TypeScript
+- Tailwind CSS, Framer Motion
+- OpenAI API (chat/completions + Realtime for voice)
+- Recharts (analytical charts)
