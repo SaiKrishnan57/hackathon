@@ -125,6 +125,7 @@ export default function Chat() {
   // Realtime voice (OpenAI Realtime API + Morph dashboard sync)
   type RealtimeStatus = "idle" | "connecting" | "connected" | "error";
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("idle");
+  const [realtimePhase, setRealtimePhase] = useState<"listening" | "speaking">("listening");
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
   const realtimePcRef = useRef<RTCPeerConnection | null>(null);
   const realtimeDcRef = useRef<RTCDataChannel | null>(null);
@@ -166,10 +167,15 @@ export default function Chat() {
       const dc = pc.createDataChannel("oai-events");
       realtimeDcRef.current = dc;
 
-      dc.addEventListener("open", () => setRealtimeStatus("connected"));
+      dc.addEventListener("open", () => {
+        setRealtimeStatus("connected");
+        setRealtimePhase("listening");
+      });
       dc.addEventListener("message", (e) => {
         try {
           const event = JSON.parse(e.data) as { type: string; item?: { role?: string; content?: Array<{ text?: string; transcript?: string; type?: string }> }; response?: { output?: Array<{ text?: string; transcript?: string }> } };
+          if (event.type === "response.created") setRealtimePhase("speaking");
+          if (event.type === "response.done") setRealtimePhase("listening");
           if (event.type === "conversation.item.added" && event.item) {
             const role = event.item.role as "user" | "assistant" | undefined;
             if (role === "user" || role === "assistant") {
@@ -266,6 +272,7 @@ export default function Chat() {
     realtimePcRef.current = null;
     realtimeDcRef.current = null;
     setRealtimeStatus("idle");
+    setRealtimePhase("listening");
     setRealtimeError(null);
   }
 
@@ -427,35 +434,6 @@ export default function Chat() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {realtimeStatus === "idle" ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    startRealtimeVoice().catch((err) => {
-                      setRealtimeError(err instanceof Error ? err.message : "Realtime failed");
-                      setRealtimeStatus("error");
-                    });
-                  }}
-                  className="rounded-full border border-emerald-600 bg-emerald-950/60 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-900/40 hover:text-emerald-200 transition-colors"
-                >
-                  Live talk
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    try {
-                      endRealtimeVoice();
-                    } catch (_) {
-                      setRealtimeStatus("idle");
-                      setRealtimeError(null);
-                    }
-                  }}
-                  className="rounded-full border border-red-600/50 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-900/40 transition-colors"
-                >
-                  End call
-                </button>
-              )}
               <button
                 type="button"
                 onClick={startNewChat}
@@ -463,15 +441,6 @@ export default function Chat() {
               >
                 New chat
               </button>
-              {realtimeStatus === "connecting" && (
-                <span className="text-xs text-zinc-400">Connecting…</span>
-              )}
-              {realtimeStatus === "connected" && (
-                <span className="text-xs text-emerald-400">Listening…</span>
-              )}
-              {realtimeStatus === "error" && realtimeError && (
-                <span className="text-xs text-red-400" title={realtimeError}>Realtime error</span>
-              )}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={mode}
@@ -488,6 +457,96 @@ export default function Chat() {
               </AnimatePresence>
             </div>
           </header>
+
+          {/* Live talk: compact entry or slim status bar */}
+          <div className="mb-3">
+            <AnimatePresence mode="wait">
+              {realtimeStatus === "idle" ? (
+                <motion.button
+                  key="idle"
+                  type="button"
+                  initial={{ opacity: 0, y: -2 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  onClick={() => {
+                    startRealtimeVoice().catch((err) => {
+                      setRealtimeError(err instanceof Error ? err.message : "Realtime failed");
+                      setRealtimeStatus("error");
+                    });
+                  }}
+                  className="group inline-flex items-center gap-2.5 rounded-lg border border-zinc-700/80 bg-zinc-900/50 px-3 py-2 text-left transition-all hover:border-emerald-600/50 hover:bg-emerald-950/20 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 focus:ring-offset-1 focus:ring-offset-zinc-950"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400 transition-colors group-hover:bg-emerald-500/20 group-hover:text-emerald-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" y1="19" x2="12" y2="23" />
+                      <line x1="8" y1="23" x2="16" y2="23" />
+                    </svg>
+                  </span>
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-zinc-200">Live talk</span>
+                    <span className="ml-1.5 text-xs text-zinc-500">· Voice conversation</span>
+                  </div>
+                </motion.button>
+              ) : (
+                <motion.div
+                  key="active"
+                  initial={{ opacity: 0, y: -2 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  className="inline-flex w-full max-w-md items-center justify-between gap-3 rounded-lg border border-zinc-700/80 bg-zinc-900/50 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {realtimeStatus === "connecting" && (
+                      <>
+                        <span className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-emerald-400" />
+                        <span className="text-xs font-medium text-zinc-400">Connecting…</span>
+                      </>
+                    )}
+                    {realtimeStatus === "connected" && realtimePhase === "listening" && (
+                      <>
+                        <div className="flex h-5 w-6 shrink-0 items-end justify-center gap-px">
+                          {[0.5, 0.75, 1, 0.7, 0.5].map((h, i) => (
+                            <span
+                              key={i}
+                              className="w-0.5 rounded-full bg-emerald-500/80 animate-pulse"
+                              style={{ height: `${h * 10}px`, animationDelay: `${i * 0.1}s` }}
+                            />
+                          ))}
+                        </div>
+                        <span className="text-xs font-medium text-zinc-300">Listening…</span>
+                      </>
+                    )}
+                    {realtimeStatus === "connected" && realtimePhase === "speaking" && (
+                      <>
+                        <div className="flex shrink-0 gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/90 animate-bounce [animation-delay:-0.2s]" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/90 animate-bounce [animation-delay:-0.1s]" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/90 animate-bounce" />
+                        </div>
+                        <span className="text-xs font-medium text-zinc-300">Speaking…</span>
+                      </>
+                    )}
+                    {realtimeStatus === "error" && realtimeError && (
+                      <span className="text-xs text-red-400/90" title={realtimeError}>Error</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try { endRealtimeVoice(); } catch (_) { setRealtimeStatus("idle"); setRealtimeError(null); }
+                    }}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+                  >
+                    End call
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Optional toast */}
           <AnimatePresence>
