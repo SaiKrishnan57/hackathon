@@ -80,6 +80,24 @@ function buildAnalyticalPayload(widgets: Widget[]) {
 
   const comparisonSummary = typeof compData.summary === "string" ? compData.summary : null;
 
+  const chartWidgets = widgets.filter((w) => w.type === "chart");
+  const charts = chartWidgets.map((w) => {
+    const d = (w.data ?? {}) as Record<string, unknown>;
+    const chartType = (d.chartType === "bar" || d.chartType === "line" || d.chartType === "pie" ? d.chartType : "bar") as "bar" | "line" | "pie";
+    const labels = Array.isArray(d.labels) ? (d.labels as string[]) : [];
+    const rawDatasets = Array.isArray(d.datasets) ? (d.datasets as Array<{ label?: string; values?: number[] }>) : [];
+    const datasets = rawDatasets.map((ds) => ({
+      label: typeof ds.label === "string" ? ds.label : "Series",
+      values: Array.isArray(ds.values) ? ds.values : []
+    }));
+    return {
+      chartType,
+      title: typeof d.title === "string" ? d.title : undefined,
+      labels,
+      datasets
+    };
+  }).filter((c) => c.labels.length > 0 && c.datasets.some((ds) => ds.values.length > 0));
+
   return {
     title: (comparison?.title as string) ?? "Compare Options",
     options: { a_label: options.a_label ?? "Option A", b_label: options.b_label ?? "Option B" },
@@ -87,7 +105,8 @@ function buildAnalyticalPayload(widgets: Widget[]) {
     summary: comparisonSummary,
     assumptions: assumptionsList,
     missing_inputs,
-    next_actions
+    next_actions,
+    charts
   };
 }
 

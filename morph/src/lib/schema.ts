@@ -8,6 +8,7 @@ const WidgetSchema = z.object({
     "brief",
     "assumptions",
     "comparison_table",
+    "chart",
     "timeline",
     "next_actions"
   ]),

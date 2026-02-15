@@ -1,5 +1,9 @@
 "use client";
 
+import ChartWidget from "../widgets/ChartWidget";
+
+type ChartSpec = { chartType: "bar" | "line" | "pie"; title?: string; labels: string[]; datasets: { label: string; values: number[] }[] };
+
 export default function Analytical({ payload }: { payload: any }) {
   const title = payload?.title ?? "Compare Options";
   const aLabel = payload?.options?.a_label ?? "Option A";
@@ -9,6 +13,7 @@ export default function Analytical({ payload }: { payload: any }) {
   const assumptions: string[] = payload?.assumptions ?? [];
   const missing: string[] = payload?.missing_inputs ?? [];
   const nextActions: string[] = payload?.next_actions ?? [];
+  const charts: ChartSpec[] = Array.isArray(payload?.charts) ? payload.charts : [];
 
   return (
     <div className="space-y-6">
@@ -65,6 +70,17 @@ export default function Analytical({ payload }: { payload: any }) {
             Takeaway
           </div>
           <p className="mt-1 text-sm leading-relaxed text-zinc-200">{summary}</p>
+        </div>
+      )}
+
+      {charts.length > 0 && (
+        <div className="space-y-4">
+          <div className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+            Charts
+          </div>
+          {charts.map((chart, i) => (
+            <ChartWidget key={chart.title ?? `chart-${i}`} spec={chart} />
+          ))}
         </div>
       )}
 

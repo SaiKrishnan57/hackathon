@@ -43,10 +43,23 @@ function modeAccentClass(mode: Mode) {
   return "text-emerald-200 border-emerald-500/30 bg-emerald-500/10";
 }
 
+function modeBorderLeftClass(mode: Mode) {
+  if (mode === "reflective") return "border-l-violet-500/40";
+  if (mode === "analytical") return "border-l-cyan-500/40";
+  return "border-l-emerald-500/40";
+}
+
+function modeDotClass(mode: Mode) {
+  if (mode === "reflective") return "bg-violet-400";
+  if (mode === "analytical") return "bg-cyan-400";
+  return "bg-emerald-400";
+}
+
+// Demo use cases: one per mode — reflective, analytical, planning (see DEMO.md for full scripts)
 const SAMPLE_PROMPTS = [
-  "I'm not sure whether to switch jobs or stay. Help me think it through.",
-  "Compare buying a car vs relying on public transport for the next year.",
-  "Give me a 4-week plan to launch a small side project.",
+  "I'm torn between staying at my job and starting something on my own. I feel stuck and don't have a clear picture yet.",
+  "I'm considering buying a car for 9 lakh. My monthly take-home is 50k. Compare that with using cab and metro for the next 2 years.",
+  "I want to launch a small web app in 8 weeks — design, build, and a minimal launch. I'm solo. Break it down for me.",
 ];
 
 export default function Chat() {
@@ -131,6 +144,11 @@ export default function Chat() {
   const realtimeDcRef = useRef<RTCDataChannel | null>(null);
   const realtimeMessagesRef = useRef<ChatMessage[]>([]);
   const realtimeStreamRef = useRef<MediaStream | null>(null);
+  const realtimeProcessedStreamRef = useRef<MediaStream | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Live talk: lower gain so background noise is less likely to trigger (0.5–0.7)
+  const REALTIME_INPUT_GAIN = 0.6;
   const dashboardStateRef = useRef(dashboardState);
   dashboardStateRef.current = dashboardState;
   const modeRef = useRef(mode);
@@ -152,8 +170,26 @@ export default function Chat() {
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
         throw new Error("Microphone access is not available (use HTTPS or a supported browser).");
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      realtimeStreamRef.current = stream;
+      const rawStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      realtimeStreamRef.current = rawStream;
+
+      const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
+      const source = ctx.createMediaStreamSource(rawStream);
+      const gainNode = ctx.createGain();
+      gainNode.gain.value = REALTIME_INPUT_GAIN;
+      const dest = ctx.createMediaStreamDestination();
+      source.connect(gainNode);
+      gainNode.connect(dest);
+      const processedStream = dest.stream;
+      realtimeProcessedStreamRef.current = processedStream;
+
       const pc = new RTCPeerConnection();
       realtimePcRef.current = pc;
 
@@ -163,7 +199,7 @@ export default function Chat() {
         audioEl.srcObject = e.streams[0];
       };
 
-      pc.addTrack(stream.getTracks()[0]);
+      pc.addTrack(processedStream.getTracks()[0]);
       const dc = pc.createDataChannel("oai-events");
       realtimeDcRef.current = dc;
 
@@ -256,6 +292,8 @@ export default function Chat() {
       setRealtimeStatus("error");
       realtimeStreamRef.current?.getTracks().forEach((t) => t.stop());
       realtimeStreamRef.current = null;
+      realtimeProcessedStreamRef.current?.getTracks().forEach((t) => t.stop());
+      realtimeProcessedStreamRef.current = null;
       realtimePcRef.current = null;
       realtimeDcRef.current = null;
     }
@@ -265,6 +303,8 @@ export default function Chat() {
     try {
       realtimeStreamRef.current?.getTracks().forEach((t) => t.stop());
       realtimeStreamRef.current = null;
+      realtimeProcessedStreamRef.current?.getTracks().forEach((t) => t.stop());
+      realtimeProcessedStreamRef.current = null;
       realtimePcRef.current?.close();
     } catch (_) {
       // ignore
@@ -307,6 +347,10 @@ export default function Chat() {
     const t = setTimeout(() => setModeToast(null), 1200);
     return () => clearTimeout(t);
   }, [mode]);
+
+  useEffect(() => {
+    chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length, loading]);
 
   function mergeDashboard(prev: any, incoming: any) {
     if (!incoming) return prev;
@@ -427,8 +471,10 @@ export default function Chat() {
         <div className="mx-auto max-w-6xl px-4 py-6">
           <header className="mb-3 flex items-start justify-between gap-4">
             <div>
-              <div className="text-2xl font-semibold">Morph</div>
-              <div className="text-zinc-400">
+              <div className={`text-2xl font-semibold tracking-tight text-zinc-100 border-b-2 pb-0.5 w-fit transition-colors duration-300 ${mode === "reflective" ? "border-violet-500/50" : mode === "analytical" ? "border-cyan-500/50" : "border-emerald-500/50"}`}>
+                Morph
+              </div>
+              <div className="mt-1 text-zinc-400 text-sm">
                 AI Dashboard Engine — conversation composes your interface.
               </div>
             </div>
@@ -437,8 +483,11 @@ export default function Chat() {
               <button
                 type="button"
                 onClick={startNewChat}
-                className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+                className="flex items-center gap-2 rounded-lg border border-zinc-600 bg-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-100 shadow-sm hover:bg-zinc-600 hover:border-zinc-500 hover:text-white transition-colors active:scale-[0.98]"
               >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                  <path d="M7 2v10M2 7h10" />
+                </svg>
                 New chat
               </button>
               <AnimatePresence mode="wait">
@@ -566,16 +615,19 @@ export default function Chat() {
 
           <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             {/* Chat Panel */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 backdrop-blur">
-              <div className="h-[56vh] overflow-y-auto pr-2">
+            <div className={`rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 backdrop-blur border-l-2 ${modeBorderLeftClass(mode)} transition-colors duration-300`}>
+              <div ref={chatScrollRef} className="h-[56vh] overflow-y-auto pr-2 scroll-smooth">
                 <div className="space-y-3">
                   {messages.map((m, idx) => (
-                    <div
+                    <motion.div
                       key={idx}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2 }}
                       className={`rounded-xl px-3 py-2 text-sm leading-relaxed ${
                         m.role === "user"
                           ? "ml-auto max-w-[85%] bg-zinc-200 text-zinc-900"
-                          : "mr-auto max-w-[85%] bg-zinc-800 text-zinc-100"
+                          : `mr-auto max-w-[85%] bg-zinc-800 text-zinc-100 border-l-2 ${modeBorderLeftClass(mode)}`
                       } ${m.role === "assistant" ? "flex items-start justify-between gap-2" : ""}`}
                     >
                       <span className="min-w-0 flex-1">{m.content}</span>
@@ -590,18 +642,22 @@ export default function Chat() {
                           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
                         </button>
                       )}
-                    </div>
+                    </motion.div>
                   ))}
 
                   {loading && (
-                    <div className="mr-auto max-w-[85%] rounded-xl bg-zinc-800 px-4 py-3 text-sm">
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className={`mr-auto max-w-[85%] rounded-xl bg-zinc-800 px-4 py-3 text-sm border-l-2 ${modeBorderLeftClass(mode)}`}
+                    >
                       <div className="flex items-center gap-1.5 text-zinc-400">
-                        <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s]" />
-                        <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s]" />
-                        <span className="inline-block h-2 w-2 animate-bounce rounded-full bg-zinc-500" />
+                        <span className={`inline-block h-2 w-2 animate-bounce rounded-full ${modeDotClass(mode)} [animation-delay:-0.3s]`} />
+                        <span className={`inline-block h-2 w-2 animate-bounce rounded-full ${modeDotClass(mode)} [animation-delay:-0.15s]`} />
+                        <span className={`inline-block h-2 w-2 animate-bounce rounded-full ${modeDotClass(mode)}`} />
                         <span className="ml-2 text-zinc-500">Thinking…</span>
                       </div>
-                    </div>
+                    </motion.div>
                   )}
                 </div>
               </div>
@@ -611,15 +667,17 @@ export default function Chat() {
                   <div className="mb-2 text-xs text-zinc-500">Try this</div>
                   <div className="flex flex-wrap gap-2">
                     {SAMPLE_PROMPTS.map((prompt) => (
-                      <button
+                      <motion.button
                         key={prompt}
                         type="button"
+                        whileHover={{ y: -2 }}
+                        whileTap={{ scale: 0.98 }}
                         onClick={() => send(prompt)}
                         disabled={loading}
-                        className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-left text-xs text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-50 disabled:pointer-events-none max-w-full"
+                        className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-left text-xs text-zinc-300 hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 hover:shadow-md hover:shadow-black/20 transition-colors disabled:opacity-50 disabled:pointer-events-none max-w-full"
                       >
                         {prompt}
-                      </button>
+                      </motion.button>
                     ))}
                   </div>
                 </div>
@@ -653,13 +711,15 @@ export default function Chat() {
                   className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:border-zinc-600"
                   readOnly={realtimeStatus !== "idle"}
                 />
-                <button
+                <motion.button
                   onClick={() => send()}
                   disabled={!canSend || realtimeStatus !== "idle"}
-                  className="rounded-xl bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
+                  whileHover={canSend && realtimeStatus === "idle" ? { scale: 1.02 } : {}}
+                  whileTap={canSend && realtimeStatus === "idle" ? { scale: 0.98 } : {}}
+                  className="rounded-xl bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40 hover:bg-zinc-100 transition-colors"
                 >
                   Send
-                </button>
+                </motion.button>
               </div>
               {realtimeStatus === "idle" && canUseSpeech && (
                 <p className="mt-1.5 text-xs text-zinc-500">
@@ -676,7 +736,7 @@ export default function Chat() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.98 }}
                 transition={{ duration: 0.22 }}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 h-[56vh] overflow-y-auto backdrop-blur"
+                className={`rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 h-[56vh] overflow-y-auto backdrop-blur border-l-2 ${modeBorderLeftClass(mode)} transition-colors duration-300`}
               >
                 <Workspace mode={mode} dashboard={dashboardState} />
               </motion.div>
