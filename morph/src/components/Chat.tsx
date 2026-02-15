@@ -1,9 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Workspace from "./Workspace";
 import type { ChatMessage, MorphResponse } from "@/lib/schema";
+
+interface SpeechRecognitionResultItem {
+  isFinal: boolean;
+  length: number;
+  0: { transcript: string };
+}
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult: ((e: { results: SpeechRecognitionResultItem[] }) => void) | null;
+  onend: (() => void) | null;
+}
 
 type Mode = "reflective" | "analytical" | "planning";
 
@@ -44,6 +59,241 @@ export default function Chat() {
 
   // Optional: subtle toast when mode changes
   const [modeToast, setModeToast] = useState<string | null>(null);
+
+  // Voice: speech-to-text (client-only to avoid hydration mismatch)
+  const [canUseSpeech, setCanUseSpeech] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const recognitionRef = useRef<{ start: () => void; stop: () => void } | null>(null);
+
+  useEffect(() => {
+    const supported =
+      typeof window !== "undefined" &&
+      !!((window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+    setCanUseSpeech(!!supported);
+  }, []);
+
+  useEffect(() => {
+    if (!canUseSpeech) return;
+    const Ctor = (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionInstance; webkitSpeechRecognition?: new () => SpeechRecognitionInstance }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionInstance }).webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+    rec.onresult = (e: { results: SpeechRecognitionResultItem[] }) => {
+      let interim = "";
+      let final = "";
+      for (const res of e.results) {
+        const t = res[0]?.transcript ?? "";
+        if (res.isFinal) final = final ? final + " " + t : t;
+        else interim = interim ? interim + " " + t : t;
+      }
+      if (final) setInput((prev) => (prev ? prev + " " + final : final).trim());
+      setInterimTranscript(interim);
+    };
+    rec.onend = () => {
+      setIsListening(false);
+      setInterimTranscript("");
+    };
+    recognitionRef.current = rec;
+    return () => {
+      try {
+        rec.stop();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    };
+  }, [canUseSpeech]);
+
+  function toggleListening() {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    if (isListening) {
+      rec.stop();
+    } else {
+      setInterimTranscript("");
+      setIsListening(true);
+      rec.start();
+    }
+  }
+
+  const speechSynthRef = useRef<SpeechSynthesis | null>(null);
+  const speakingRef = useRef(false);
+
+  // Realtime voice (OpenAI Realtime API + Morph dashboard sync)
+  type RealtimeStatus = "idle" | "connecting" | "connected" | "error";
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("idle");
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
+  const realtimePcRef = useRef<RTCPeerConnection | null>(null);
+  const realtimeDcRef = useRef<RTCDataChannel | null>(null);
+  const realtimeMessagesRef = useRef<ChatMessage[]>([]);
+  const realtimeStreamRef = useRef<MediaStream | null>(null);
+  const dashboardStateRef = useRef(dashboardState);
+  dashboardStateRef.current = dashboardState;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  function extractItemText(item: { role?: string; content?: Array<{ text?: string; transcript?: string; type?: string }> }): string {
+    if (!item.content?.length) return "";
+    return item.content
+      .map((c) => c.transcript ?? c.text ?? "")
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  async function startRealtimeVoice() {
+    setRealtimeError(null);
+    setRealtimeStatus("connecting");
+    realtimeMessagesRef.current = [];
+    try {
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone access is not available (use HTTPS or a supported browser).");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      realtimeStreamRef.current = stream;
+      const pc = new RTCPeerConnection();
+      realtimePcRef.current = pc;
+
+      const audioEl = document.createElement("audio");
+      audioEl.autoplay = true;
+      pc.ontrack = (e) => {
+        audioEl.srcObject = e.streams[0];
+      };
+
+      pc.addTrack(stream.getTracks()[0]);
+      const dc = pc.createDataChannel("oai-events");
+      realtimeDcRef.current = dc;
+
+      dc.addEventListener("open", () => setRealtimeStatus("connected"));
+      dc.addEventListener("message", (e) => {
+        try {
+          const event = JSON.parse(e.data) as { type: string; item?: { role?: string; content?: Array<{ text?: string; transcript?: string; type?: string }> }; response?: { output?: Array<{ text?: string; transcript?: string }> } };
+          if (event.type === "conversation.item.added" && event.item) {
+            const role = event.item.role as "user" | "assistant" | undefined;
+            if (role === "user" || role === "assistant") {
+              const text = extractItemText(event.item);
+              if (text) {
+                const msg: ChatMessage = { role, content: text };
+                realtimeMessagesRef.current = [...realtimeMessagesRef.current, msg];
+                setMessages((prev) => [...prev, msg]);
+              }
+            }
+          }
+          if (event.type === "response.done" && event.response) {
+            const out = event.response as { output?: Array<{ text?: string; transcript?: string; content?: Array<{ text?: string; transcript?: string }> }> };
+            let assistantText = "";
+            if (Array.isArray(out.output)) {
+              assistantText = out.output
+                .map((p) => p.transcript ?? p.text ?? (Array.isArray(p.content) ? p.content.map((c) => c.transcript ?? c.text ?? "").join(" ") : ""))
+                .filter(Boolean)
+                .join(" ")
+                .trim();
+            }
+            if (assistantText) {
+              const assistantMsg: ChatMessage = { role: "assistant", content: assistantText };
+              realtimeMessagesRef.current = [...realtimeMessagesRef.current, assistantMsg];
+              setMessages((prev) => [...prev, assistantMsg]);
+            }
+            const messagesForMorph = realtimeMessagesRef.current.slice(-20);
+            if (messagesForMorph.length === 0) return;
+            fetch("/api/morph", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ messages: messagesForMorph, dashboardState: dashboardStateRef.current }),
+            })
+              .then((res) => res.json())
+              .then((data) => {
+                if (data.mode) {
+                  setPrevMode(modeRef.current);
+                  setMode(data.mode);
+                  setModeToast(`Switched to ${modeLabel(data.mode)}`);
+                }
+                if (data.dashboard) {
+                  setDashboardState((prev: any) => {
+                    if (!data.dashboard) return prev;
+                    if (data.dashboard.action === "set") return { widgets: data.dashboard.widgets ?? [] };
+                    const prevMap = new Map((prev.widgets ?? []).map((w: any) => [w.id, w]));
+                    for (const w of data.dashboard.widgets ?? []) {
+                      prevMap.set(w.id, { ...(prevMap.get(w.id) ?? {}), ...w });
+                    }
+                    const merged = Array.from(prevMap.values());
+                    merged.sort((a: any, b: any) => (b.priority ?? 0) - (a.priority ?? 0) || String(a.id).localeCompare(String(b.id)));
+                    return { widgets: merged };
+                  });
+                }
+              })
+              .catch(() => {});
+          }
+        } catch (_) {}
+      });
+      dc.addEventListener("close", () => setRealtimeStatus("idle"));
+      dc.addEventListener("error", () => setRealtimeStatus("error"));
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      const sdpBody = offer.sdp ?? "";
+      const sdpRes = await fetch("/api/realtime/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: sdpBody,
+      });
+      if (!sdpRes.ok) {
+        const err = await sdpRes.json().catch(() => ({}));
+        throw new Error(err.error ?? "Realtime call failed");
+      }
+      const answerSdp = await sdpRes.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    } catch (err) {
+      setRealtimeError(err instanceof Error ? err.message : "Realtime failed");
+      setRealtimeStatus("error");
+      realtimeStreamRef.current?.getTracks().forEach((t) => t.stop());
+      realtimeStreamRef.current = null;
+      realtimePcRef.current = null;
+      realtimeDcRef.current = null;
+    }
+  }
+
+  function endRealtimeVoice() {
+    try {
+      realtimeStreamRef.current?.getTracks().forEach((t) => t.stop());
+      realtimeStreamRef.current = null;
+      realtimePcRef.current?.close();
+    } catch (_) {
+      // ignore
+    }
+    realtimePcRef.current = null;
+    realtimeDcRef.current = null;
+    setRealtimeStatus("idle");
+    setRealtimeError(null);
+  }
+
+  function readAloud(text: string) {
+    const safeText = typeof text === "string" ? text : "";
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    try {
+      window.speechSynthesis.cancel();
+    } catch (_) {}
+    const u = new SpeechSynthesisUtterance(safeText);
+    u.lang = "en-US";
+    u.rate = 0.95;
+    u.pitch = 1;
+    speechSynthRef.current = window.speechSynthesis;
+    speakingRef.current = true;
+    u.onend = () => {
+      speakingRef.current = false;
+    };
+    window.speechSynthesis.speak(u);
+  }
+
+  function stopReading() {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      speakingRef.current = false;
+    }
+  }
+
   useEffect(() => {
     if (!mode) return;
     setModeToast(`Switched to ${modeLabel(mode)}`);
@@ -76,12 +326,17 @@ export default function Chat() {
   const canSend = input.trim().length > 0 && !loading;
 
   function startNewChat() {
+    stopReading();
+    if (isListening && recognitionRef.current) recognitionRef.current.stop();
+    if (realtimeStatus !== "idle") endRealtimeVoice();
     setMessages([]);
     setInput("");
     setDashboardState({ widgets: [] });
     setMode("reflective");
     setPrevMode("reflective");
     setModeToast(null);
+    setInterimTranscript("");
+    setIsListening(false);
   }
 
   async function send(contentOverride?: string) {
@@ -171,7 +426,36 @@ export default function Chat() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {realtimeStatus === "idle" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    startRealtimeVoice().catch((err) => {
+                      setRealtimeError(err instanceof Error ? err.message : "Realtime failed");
+                      setRealtimeStatus("error");
+                    });
+                  }}
+                  className="rounded-full border border-emerald-600 bg-emerald-950/60 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-900/40 hover:text-emerald-200 transition-colors"
+                >
+                  Live talk
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      endRealtimeVoice();
+                    } catch (_) {
+                      setRealtimeStatus("idle");
+                      setRealtimeError(null);
+                    }
+                  }}
+                  className="rounded-full border border-red-600/50 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-900/40 transition-colors"
+                >
+                  End call
+                </button>
+              )}
               <button
                 type="button"
                 onClick={startNewChat}
@@ -179,6 +463,15 @@ export default function Chat() {
               >
                 New chat
               </button>
+              {realtimeStatus === "connecting" && (
+                <span className="text-xs text-zinc-400">Connecting…</span>
+              )}
+              {realtimeStatus === "connected" && (
+                <span className="text-xs text-emerald-400">Listening…</span>
+              )}
+              {realtimeStatus === "error" && realtimeError && (
+                <span className="text-xs text-red-400" title={realtimeError}>Realtime error</span>
+              )}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={mode}
@@ -224,9 +517,20 @@ export default function Chat() {
                         m.role === "user"
                           ? "ml-auto max-w-[85%] bg-zinc-200 text-zinc-900"
                           : "mr-auto max-w-[85%] bg-zinc-800 text-zinc-100"
-                      }`}
+                      } ${m.role === "assistant" ? "flex items-start justify-between gap-2" : ""}`}
                     >
-                      {m.content}
+                      <span className="min-w-0 flex-1">{m.content}</span>
+                      {m.role === "assistant" && (
+                        <button
+                          type="button"
+                          onClick={() => readAloud(m.content ?? "")}
+                          className="flex-shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+                          title="Read aloud"
+                          aria-label="Read aloud"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
+                        </button>
+                      )}
                     </div>
                   ))}
 
@@ -261,22 +565,48 @@ export default function Chat() {
                   </div>
                 </div>
               )}
-              <div className="mt-4 flex gap-2">
+              {isListening && interimTranscript && (
+                <div className="mt-2 text-xs text-zinc-500 italic">
+                  Listening… {interimTranscript}
+                </div>
+              )}
+              {realtimeStatus !== "idle" && (
+                <p className="mt-2 text-xs text-emerald-400/80">Live talk active — speak to the agent; dashboard updates after each reply.</p>
+              )}
+              <div className="mt-4 flex gap-2 items-center">
+                {realtimeStatus === "idle" && canUseSpeech && (
+                  <button
+                    type="button"
+                    onClick={toggleListening}
+                    disabled={loading}
+                    className={`flex-shrink-0 rounded-xl p-2.5 transition-colors ${isListening ? "bg-red-500/20 text-red-400 border border-red-500/40" : "border border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"}`}
+                    title={isListening ? "Stop listening" : "Start voice input"}
+                    aria-label={isListening ? "Stop listening" : "Start voice input"}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                  </button>
+                )}
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onKeyDown}
-                  placeholder="Type here… (Ctrl+Enter to send)"
+                  placeholder={realtimeStatus !== "idle" ? "Live talk — use mic" : isListening ? "Speak…" : "Type here… (Ctrl+Enter to send)"}
                   className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+                  readOnly={realtimeStatus !== "idle"}
                 />
                 <button
                   onClick={() => send()}
-                  disabled={!canSend}
+                  disabled={!canSend || realtimeStatus !== "idle"}
                   className="rounded-xl bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
                 >
                   Send
                 </button>
               </div>
+              {realtimeStatus === "idle" && canUseSpeech && (
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  Use the mic to speak; click again to stop. Assistant replies have a speaker icon to read aloud.
+                </p>
+              )}
             </div>
 
             {/* Dashboard Panel */}
