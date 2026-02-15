@@ -10,12 +10,21 @@ type Widget = { id: string; type: string; title?: string; data?: Record<string, 
 
 function buildReflectivePayload(widgets: Widget[]) {
   const brief = widgets.find((w) => w.type === "brief");
+  const assumptionsWidget = widgets.find((w) => w.type === "assumptions");
+  const nextActionsWidget = widgets.find((w) => w.type === "next_actions");
+
   const data = (brief?.data ?? {}) as Record<string, unknown>;
   const goal = typeof data.goal === "string" ? data.goal : null;
   const summary = typeof data.summary === "string" ? data.summary : null;
   const constraints = Array.isArray(data.constraints) ? (data.constraints as string[]) : [];
   const missing = Array.isArray(data.missing_inputs) ? (data.missing_inputs as string[]) : [];
   const status = typeof data.status === "string" ? data.status : null;
+  const confidence = typeof data.confidence === "number" ? data.confidence : null;
+
+  const assumptions = (assumptionsWidget?.data as Record<string, unknown>)?.items;
+  const assumptionsList = Array.isArray(assumptions) ? (assumptions as string[]) : [];
+  const nextData = (nextActionsWidget?.data ?? {}) as Record<string, unknown>;
+  const next_actions = Array.isArray(nextData.items) ? (nextData.items as string[]) : [];
 
   const summary_points: string[] = [];
   if (summary) summary_points.push(summary);
@@ -25,7 +34,18 @@ function buildReflectivePayload(widgets: Widget[]) {
 
   const prompt_chips = missing.length > 0 ? missing : constraints;
 
-  return { summary_points, prompt_chips, goal: goal ?? undefined };
+  return {
+    goal: goal ?? undefined,
+    summary: summary ?? undefined,
+    summary_points,
+    prompt_chips,
+    constraints,
+    missing_inputs: missing,
+    status: status ?? undefined,
+    confidence: confidence ?? undefined,
+    assumptions: assumptionsList,
+    next_actions,
+  };
 }
 
 function buildAnalyticalPayload(widgets: Widget[]) {
